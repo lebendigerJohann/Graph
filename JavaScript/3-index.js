@@ -1,6 +1,6 @@
 'use strict';
 
-const intersection = (s1, s2) => new Set([...s1].filter((v) => s2.has(v)));
+const intersection = (s1, s2) => new Set([...s1].filter(v => s2.has(v)));
 
 class Vertex {
   constructor(graph, data) {
@@ -8,11 +8,10 @@ class Vertex {
     this.data = data;
     this.links = new Map();
   }
-
   link(...args) {
     const distinct = new Set(args);
-    const { links } = this;
-    const { keyField } = this.graph;
+    const links = this.links;
+    const keyField = this.graph.keyField;
     for (const item of distinct) {
       const key = item.data[keyField];
       links.set(key, item);
@@ -25,14 +24,16 @@ class Cursor {
   constructor(vertices) {
     this.vertices = vertices;
   }
-
   linked(...names) {
-    const { vertices } = this;
+    const vertices = this.vertices;
     const result = new Set();
-    for (const vertex of vertices.values()) {
+    for (const vertex of vertices) {
       let condition = true;
       for (const name of names) {
-        condition = condition && vertex.links.has(name);
+        if (!vertex.links.has(name)) {
+          condition = false;
+          break;
+        }
       }
       if (condition) result.add(vertex);
     }
@@ -46,7 +47,6 @@ class Graph {
     this.vertices = new Map();
     this.indices = new Map();
   }
-
   add(data) {
     const vertex = new Vertex(this, data);
     const key = data[this.keyField];
@@ -55,19 +55,21 @@ class Graph {
     }
     return vertex;
   }
-
   select(query) {
-    let vertices;
+    let vertices = new Set(this.vertices.values());
+    const indices = this.indices;
     const keys = Object.keys(query);
-    for (const field of keys) {
+    const indexedKeys = keys.filter((key) => indices.has(key));
+    const nonIndexedKeys = keys.filter((key) => !indices.has(key));
+    const sortedKeys = [...indexedKeys, ...nonIndexedKeys];
+    for (const field of sortedKeys) {
       const idx = this.indices.get(field);
       if (idx) {
         const value = query[field];
         const records = idx.get(value);
-        vertices = vertices ? intersection(vertices, records) : records;
+        vertices = intersection(vertices, records);
       } else {
-        vertices = vertices || new Set(this.vertices.values());
-        for (const vertex of vertices) {
+        for (const vertex of vertices.values()) {
           const { data } = vertex;
           if (data[field] !== query[field]) {
             vertices.delete(vertex);
@@ -77,38 +79,30 @@ class Graph {
     }
     return new Cursor(vertices);
   }
-
   static link(from) {
     return {
       to(...destinations) {
-        destinations.forEach((target) => {
-          if (target) from.link(target);
-        });
-      },
+        if (from) from.link(...destinations);
+      }
     };
   }
-
-  insert(rows) {
+  insert(records) {
     const vertices = [];
-    for (const record of rows) {
+    for (const record of records) {
       const vertex = this.add(record);
       vertices.push(vertex);
       const keys = Object.keys(record);
       for (const [key, idx] of this.indices) {
         if (keys.includes(key)) {
           const value = record[key];
-          let records = idx.get(value);
-          if (!records) {
-            records = new Set();
-            idx.set(value, records);
-          }
+          if (!idx.has(value)) idx.set(value, new Set());
+          const records = idx.get(value);
           records.add(vertex);
         }
       }
     }
     return vertices;
   }
-
   index(key) {
     let idx = this.indices.get(key);
     if (!idx) {
@@ -132,26 +126,26 @@ class Graph {
 
 const graph = new Graph('name').index('city');
 
-const [marcus, lucius, pius, hadrian, trajan] = graph.insert([
+const [marcus, lucius, antoninus, hadrian, trajan] = graph.insert([
   { name: 'Marcus Aurelius', city: 'Rome', born: 121, dynasty: 'Antonine' },
   { name: 'Lucius Verus', city: 'Rome', born: 130, dynasty: 'Antonine' },
   { name: 'Antoninus Pius', city: 'Lanuvium', born: 86, dynasty: 'Antonine' },
   { name: 'Hadrian', city: 'Santiponce', born: 76, dynasty: 'Nerva–Trajan' },
-  { name: 'Trajan', city: 'Sevilla', born: 98, dynasty: 'Nerva–Trajan' },
+  { name: 'Trajan', city: 'Sevilla', born: 98, dynasty: 'Nerva–Trajan' }
 ]);
 
 graph.index('dynasty');
 
 Graph.link(marcus).to(lucius);
 Graph.link(lucius).to(trajan, marcus, marcus);
-Graph.link(pius).to(marcus, lucius);
+Graph.link(antoninus).to(marcus, lucius);
 Graph.link(hadrian).to(trajan);
 Graph.link(trajan).to(lucius, marcus);
 
-console.dir({ graph }, { depth: null });
+// console.dir({ graph }, { depth: null });
 
 const res = graph
-  .select({ city: 'Rome', dynasty: 'Antonine' })
+  .select({ dynasty: 'Antonine', city: 'Rome', })
   .linked('Trajan');
 
 console.log('\nQuery result:\n');
